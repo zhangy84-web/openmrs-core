@@ -12,6 +12,7 @@ package org.openmrs.util;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.anyOf;
 import static org.hamcrest.Matchers.is;
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -25,15 +26,12 @@ import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.io.OutputStreamWriter;
+import java.io.*;
 import java.net.URL;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -71,10 +69,16 @@ import org.openmrs.logging.OpenmrsLoggingUtil;
 import org.openmrs.test.TestUtil;
 import org.openmrs.test.jupiter.BaseContextSensitiveTest;
 
+import org.junit.jupiter.api.io.TempDir;
+
+
 /**
  * Tests the methods in {@link OpenmrsUtil} TODO: finish adding tests for all methods
  */
 public class OpenmrsUtilTest extends BaseContextSensitiveTest {
+
+	@TempDir
+	Path tempDir;
 	
 	private static GlobalProperty luhnGP = new GlobalProperty(
 	        OpenmrsConstants.GLOBAL_PROPERTY_DEFAULT_PATIENT_IDENTIFIER_VALIDATOR,
@@ -1061,7 +1065,7 @@ public class OpenmrsUtilTest extends BaseContextSensitiveTest {
 	}
 
 	@Test
-	public void isValidNumericValue_shouldNotReturnErrorMessageWhenNoReferenceRangeIsAvailable() {
+	public void isValidNumericValue_shouldNotReturnErrorMessageWhenNoReferenceRangeIsAvailable() throws IOException {
 		Calendar calendar = Calendar.getInstance();
 		calendar.add(Calendar.YEAR, -10);
 		Person person = new Person(10);
@@ -1076,4 +1080,149 @@ public class OpenmrsUtilTest extends BaseContextSensitiveTest {
 
 		assertEquals("", result);
 	}
+
+		
+
+		// -----------------------------
+		// compareWithNullAsEarliest(Date, Date)
+
+		@Test
+		public void compareWithNullAsEarliest_shouldReturnZeroWhenBothNull() {
+			assertEquals(0, OpenmrsUtil.compareWithNullAsEarliest(null, null));
+		}
+
+		@Test
+		public void compareWithNullAsEarliest_shouldReturnMinusOneWhenFirstIsNull() {
+			Date d2 = new Date();
+			assertEquals(-1, OpenmrsUtil.compareWithNullAsEarliest(null, d2));
+		}
+
+		@Test
+		public void compareWithNullAsEarliest_shouldReturnOneWhenSecondIsNull() {
+			Date d1 = new Date();
+			assertEquals(1, OpenmrsUtil.compareWithNullAsEarliest(d1, null));
+		}
+
+		@Test
+		public void compareWithNullAsEarliest_shouldDelegateToCompareWhenBothNonNull() {
+			Date earlier = new Date(1000L);
+			Date later = new Date(2000L);
+
+			int result1 = OpenmrsUtil.compareWithNullAsEarliest(earlier, later);
+			int result2 = OpenmrsUtil.compareWithNullAsEarliest(later, earlier);
+			int result3 = OpenmrsUtil.compareWithNullAsEarliest(earlier, earlier);
+
+			assertTrue(result1 < 0);
+			assertTrue(result2 > 0);
+			assertEquals(0, result3);
+		}
+
+		// -----------------------------
+		// getFileAsString(File)
+
+		@Test
+		public void getFileAsString_shouldReadUtf8Content() throws Exception {
+			Path file = tempDir.resolve("hello.txt");
+			String content = "Hello, OpenMRS!\n第二行🙂";
+			Files.write(file, content.getBytes(StandardCharsets.UTF_8));
+
+			String actual = OpenmrsUtil.getFileAsString(file.toFile());
+			assertEquals(content, actual);
+		}
+
+		// -----------------------------
+		// getFileAsBytes(File)
+
+		@Test
+		public void getFileAsBytes_shouldReadBytesForNormalFile() throws Exception {
+			Path file = tempDir.resolve("bytes.bin");
+			byte[] data = new byte[] { 1, 2, 3, 4, 5, 6 };
+			Files.write(file, data);
+
+			byte[] actual = OpenmrsUtil.getFileAsBytes(file.toFile());
+			assertArrayEquals(data, actual);
+		}
+
+		@Test
+		public void getFileAsBytes_shouldReturnNullWhenFileCannotBeOpened() throws IOException {
+			// Passing a directory will cause FileInputStream to throw, which is caught -> returns null
+			File directoryAsFile = tempDir.toFile();
+			byte[] actual = OpenmrsUtil.getFileAsBytes(directoryAsFile);
+			assertNull(actual);
+		}
+
+		// -----------------------------
+		// getFileMimeType(File)
+
+		@Test
+		public void getFileMimeType_shouldReturnNonNullMimeType() throws Exception {
+			Path file = tempDir.resolve("a.txt");
+			Files.write(file, "abc".getBytes(StandardCharsets.UTF_8));
+
+			String mime = OpenmrsUtil.getFileMimeType(file.toFile());
+			assertNotNull(mime);
+			assertFalse(mime.trim().isEmpty());
+		}
+
+		// -----------------------------
+		// folderContains(File, String)
+
+		@Test
+		public void folderContains_shouldReturnFalseWhenFolderIsNull() {
+			assertFalse(OpenmrsUtil.folderContains(null, "anything.txt"));
+		}
+
+		@Test
+		public void folderContains_shouldReturnFalseWhenFolderIsNotDirectory() throws Exception {
+			Path file = tempDir.resolve("notADir.txt");
+			Files.write(file, "x".getBytes(StandardCharsets.UTF_8));
+
+			assertFalse(OpenmrsUtil.folderContains(file.toFile(), "notADir.txt"));
+		}
+
+		@Test
+		public void folderContains_shouldReturnTrueWhenFilenameExistsInFolder() throws Exception {
+			Path folder = tempDir.resolve("folder");
+			Files.createDirectories(folder);
+
+			Files.write(folder.resolve("target.txt"), "data".getBytes(StandardCharsets.UTF_8));
+			Files.write(folder.resolve("other.txt"), "data".getBytes(StandardCharsets.UTF_8));
+
+			assertTrue(OpenmrsUtil.folderContains(folder.toFile(), "target.txt"));
+			assertFalse(OpenmrsUtil.folderContains(folder.toFile(), "missing.txt"));
+		}
+
+		// -----------------------------
+		// deleteDirectory(File)
+
+		@Test
+		public void deleteDirectory_shouldThrowWhenNotADirectory() throws Exception {
+			Path file = tempDir.resolve("singleFile.txt");
+			Files.write(file, "x".getBytes(StandardCharsets.UTF_8));
+
+			assertThrows(IOException.class, () -> OpenmrsUtil.deleteDirectory(file.toFile()));
+		}
+
+		@Test
+		public void deleteDirectory_shouldDeleteNestedDirectoryStructure() throws Exception {
+			Path root = tempDir.resolve("rootDir");
+			Path nested = root.resolve("nested");
+			Files.createDirectories(nested);
+
+			Files.write(root.resolve("a.txt"), "A".getBytes(StandardCharsets.UTF_8));
+			Files.write(nested.resolve("b.txt"), "B".getBytes(StandardCharsets.UTF_8));
+			Files.write(nested.resolve("c.txt"), "C".getBytes(StandardCharsets.UTF_8));
+
+			assertTrue(Files.exists(root));
+			assertTrue(Files.exists(nested));
+
+			boolean success = OpenmrsUtil.deleteDirectory(root.toFile());
+
+			// It should be deleted (success may still be true/false depending on OS locks),
+			// but in normal conditions it returns true and the directory disappears.
+			assertTrue(success);
+			assertFalse(Files.exists(root));
+		}
+	
+	
 }
